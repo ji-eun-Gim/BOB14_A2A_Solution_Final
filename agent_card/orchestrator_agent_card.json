@@ -1,0 +1,143 @@
+{
+  "agent_id": "Orchestrator",
+  "card": {
+    "name": "Orchestrator",
+    "description": "Root Orchestrator Agent",
+    "protocolVersion": "1.0",
+    "url": "http://localhost:10000",
+    "preferredTransport": "JSONRPC",
+    "version": "1.0.0",
+
+    "provider": {
+      "organization": "Attager.ai",
+      "url": "https://Attager.ai"
+    },
+
+    "capabilities": {
+      "streaming": true,
+      "pushNotifications": true,
+      "stateTransitionHistory": true
+    },
+
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+
+    "security": [
+      {
+        "bearerAuth": []
+      }
+    ],
+
+    "defaultInputModes": ["text/plain"],
+    "defaultOutputModes": ["text/plain"],
+
+    "skills": [
+      {
+        "id": "agent_coordination",
+        "name": "에이전트 조율",
+        "description": "사용자 요청을 분석하여 적절한 에이전트를 선택하고 작업을 위임한 후 결과를 사용자에게 반환합니다.",
+        "tags": ["orchestration", "coordination", "routing", "multi-agent"],
+        "examples": [
+          "주문 ORD1001의 배송 상태 확인해줘",
+          "차량 V001의 현재 위치는?",
+          "품질 검사 결과 요약해줘",
+          "사용 가능한 에이전트 목록 보여줘"
+        ],
+        "inputModes": ["text/plain"],
+        "outputModes": ["text/plain"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    ],
+
+    "extensions": [
+      {
+        "uri": "https://Attager.ai/ext/tools/v1",
+        "description": "Orchestrator가 사용하는 내부 도구 및 스키마 정의",
+        "required": false,
+        "params": {
+          "tools": [
+            {
+              "tool_id": "load_agent_cards",
+              "skill": "agent_coordination",
+              "description": "Agent Registry 서버에서 등록된 에이전트 카드 목록을 조회하여 상태에 저장하고, 에이전트 이름 리스트를 반환합니다.",
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tool_context": {
+                    "type": "object",
+                    "description": "ADK ToolContext 객체 (자동 전달됨)"
+                  }
+                },
+                "required": ["tool_context"],
+                "additionalProperties": false
+              }
+            },
+            {
+              "tool_id": "call_remote_agent",
+              "skill": "agent_coordination",
+              "description": "A2A SDK를 사용하여 특정 에이전트에게 작업을 위임합니다.",
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tool_context": {
+                    "type": "object",
+                    "description": "ADK ToolContext 객체 (자동 전달됨)"
+                  },
+                  "agent_name": {
+                    "type": "string",
+                    "description": "호출할 에이전트의 이름 (예: DeliveryAgent, ItemAgent, QualityAgent, VehicleAgent)"
+                  },
+                  "task": {
+                    "type": "string",
+                    "description": "에이전트에게 전달할 작업 또는 질문"
+                  }
+                },
+                "required": ["tool_context", "agent_name", "task"],
+                "additionalProperties": false
+              }
+            },
+            {
+              "tool_id": "return_result",
+              "skill": "agent_coordination",
+              "description": "최종 결과를 사용자에게 반환합니다.",
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tool_context": {
+                    "type": "object",
+                    "description": "ADK ToolContext 객체 (자동 전달됨)"
+                  },
+                  "result": {
+                    "type": "string",
+                    "description": "사용자에게 전달할 최종 결과 메시지"
+                  }
+                },
+                "required": ["tool_context", "result"],
+                "additionalProperties": false
+              }
+            }
+          ]
+        }
+      }
+    ],
+
+    "signatures": [
+      {
+        "protected": "eyJhbGciOiJIUzI1NiIsImtpZCI6InJlZ2lzdHJ5LWhzMjU2LWtleS0xIiwidHlwIjoiSldUIn0",
+        "signature": "orchestrator-signature-placeholder-change-in-production",
+        "header": {
+          "kid": "registry-hs256-key-1"
+        }
+      }
+    ]
+  }
+}

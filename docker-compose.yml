@@ -1,0 +1,346 @@
+services:
+  # Agent Registry (주석 처리 - 디렉토리 없음)
+  # agent-registry:
+  #   build:
+  #     context: ./agent-reg
+  #     dockerfile: Dockerfile
+  #   container_name: agent-registry
+  #   ports:
+  #     - "8000:8000"
+  #   environment:
+  #     - DATABASE_PATH=/app/agent_reg.db
+  #   volumes:
+  #     - agent_reg_data:/app
+  #   networks:
+  #     - agent-network
+  #   restart: unless-stopped
+
+  # Agent Registry Frontend (주석 처리 - 디렉토리 없음)
+  # agent-registry-frontend:
+  #   build:
+  #     context: ./agent-reg/frontend
+  #     dockerfile: Dockerfile
+  #   container_name: attager-agent-registry-frontend
+  #   ports:
+  #     - "3000:3000"
+  #   networks:
+  #     - agent-network
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - agent-registry
+
+  # Redis for Agents (기존 에이전트용 Redis)
+  redis-agents:
+    image: redis:7-alpine
+    container_name: attager-redis-agents
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-agents-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - agent-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Seed data for agent Redis
+  agent-redis-seeder:
+    build:
+      context: ./agentDB
+      dockerfile: Dockerfile.seeder
+    container_name: attager-agent-redis-seeder
+    depends_on:
+      redis-agents:
+        condition: service_healthy
+    environment:
+      - AGENT_REDIS_HOST=redis-agents
+      - AGENT_REDIS_PORT=6379
+      - AGENT_REDIS_DB=0
+      - AGENT_REDIS_WAIT_SECONDS=60
+    volumes:
+      - ./agentDB/seed_data.txt:/app/seed_data.txt:ro
+    networks:
+      - agent-network
+    restart: "no"
+
+  # Redis for IAM Solution (IAM 솔루션 전용 Redis)
+  redis-iam:
+    image: redis:7-alpine
+    container_name: attager-redis-iam
+    ports:
+      - "6382:6379"
+    volumes:
+      - redis-iam-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - agent-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # IAM Policy Server (can be replaced by frontend app)
+  policy-server:
+    build:
+      context: .
+      dockerfile: ./Orchestrator_plugin/Dockerfile
+    container_name: attager-policy-server
+    ports:
+      - "8005:8005"
+    environment:
+      - REDIS_HOST=redis-iam
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - PORT=8005
+    depends_on:
+      redis-iam:
+        condition: service_healthy
+    networks:
+      - agent-network
+    command: python server_redis.py
+
+  # Solution Redis
+  solution-redis:
+    image: redis:7-alpine
+    container_name: attager-solution-redis
+    ports:
+      - "6381:6379"
+    volumes:
+      - solution_redis_data:/data
+    restart: unless-stopped
+    networks:
+      - agent-network
+
+  # IAM Solution (Backend + Frontend)
+  solution:
+    build:
+      context: ./solution
+      dockerfile: Dockerfile
+    container_name: attager-solution
+    command: gunicorn -b 0.0.0.0:3000 app.main:app
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./solution/.env
+    environment:
+      - REDIS_URL=redis://solution-redis:6379/0
+      - JWT_REDIS_URL=redis://host.docker.internal:6380/0
+      - PORT=3000
+      - USERME_DIRECT_URL=http://host.docker.internal:8000/users/me
+    volumes:
+      - solution_data:/app/data
+    depends_on:
+      - solution-redis
+      - jwt-server
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - agent-network
+
+  # Delivery Agent
+  delivery-agent:
+    build:
+      context: .
+      dockerfile: ./agents/delivery_agent/Dockerfile
+    container_name: delivery-agent
+    ports:
+      - "10001:10001"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - REDIS_HOST=redis-agents
+      - REDIS_PORT=6379
+      - POLICY_SERVER_URL=http://policy-server:8005
+      - LOG_SERVER_URL=http://policy-server:8005
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      redis-agents:
+        condition: service_healthy
+      agent-redis-seeder:
+        condition: service_completed_successfully
+      policy-server:
+        condition: service_started
+    networks:
+      - agent-network
+
+  # Item Agent
+  item-agent:
+    build:
+      context: .
+      dockerfile: ./agents/item_agent/Dockerfile
+    container_name: item-agent
+    ports:
+      - "10002:10002"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - REDIS_HOST=redis-agents
+      - REDIS_PORT=6379
+      - POLICY_SERVER_URL=http://policy-server:8005
+      - LOG_SERVER_URL=http://policy-server:8005
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      redis-agents:
+        condition: service_healthy
+      agent-redis-seeder:
+        condition: service_completed_successfully
+      policy-server:
+        condition: service_started
+    networks:
+      - agent-network
+
+  # Quality Agent
+  quality-agent:
+    build:
+      context: .
+      dockerfile: ./agents/qulity_agent/Dockerfile
+    container_name: quality-agent
+    ports:
+      - "10003:10003"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - REDIS_HOST=redis-agents
+      - REDIS_PORT=6379
+      - POLICY_SERVER_URL=http://policy-server:8005
+      - LOG_SERVER_URL=http://policy-server:8005
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      redis-agents:
+        condition: service_healthy
+      agent-redis-seeder:
+        condition: service_completed_successfully
+      policy-server:
+        condition: service_started
+    networks:
+      - agent-network
+
+  # Vehicle Agent
+  vehicle-agent:
+    build:
+      context: .
+      dockerfile: ./agents/vehicle_agent/Dockerfile
+    container_name: vehicle-agent
+    ports:
+      - "10004:10004"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - REDIS_HOST=redis-agents
+      - REDIS_PORT=6379
+      - POLICY_SERVER_URL=http://policy-server:8005
+      - LOG_SERVER_URL=http://policy-server:8005
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      redis-agents:
+        condition: service_healthy
+      agent-redis-seeder:
+        condition: service_completed_successfully
+      policy-server:
+        condition: service_started
+    networks:
+      - agent-network
+
+  # Orchestrator Server
+  orchestrator:
+    build:
+      context: .
+      dockerfile: ./Orchestrator_plugin/Dockerfile.orchestrator
+    container_name: orchestrator
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - AGENT_REGISTRY_URL=http://solution:3000
+      - POLICY_SERVER_URL=http://policy-server:8005
+      - LOG_SERVER_URL=http://policy-server:8005
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      policy-server:
+        condition: service_started
+      solution:
+        condition: service_started
+    ports:
+      - "10000:10000"
+    networks:
+      - agent-network
+
+  # Standalone Orchestrator chat client
+  orchestrator-client:
+    build:
+      context: .
+      dockerfile: ./client/Dockerfile
+    container_name: orchestrator-client
+    environment:
+      - ORCHESTRATOR_RPC_URL=http://orchestrator:10000/
+      - JWT_SERVER_URL=http://jwt-server:8000
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      orchestrator:
+        condition: service_started
+      jwt-server:
+        condition: service_started
+    ports:
+      - "8010:8010"
+    networks:
+      - agent-network
+
+  # JWT Redis
+  jwt-redis:
+    image: redis:8
+    container_name: attager-jwt-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - jwt_redis_data:/data
+    networks:
+      - agent-network
+
+  # JWT Auth Server
+  jwt-server:
+    build:
+      context: ./jwt-server
+      dockerfile: Dockerfile
+    container_name: attager-jwt-server
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    depends_on:
+      - jwt-redis
+    environment:
+      - REDIS_URL=redis://jwt-redis:6379/0
+      - TENANT_REDIS_URL=redis://jwt-redis:6379/1
+    restart: unless-stopped
+    networks:
+      - agent-network
+
+  # JWS Signing/Verification Server
+  jws-server:
+    build:
+      context: ./jws-server
+      dockerfile: Dockerfile
+    container_name: attager-jws-server
+    command: uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8001}
+    ports:
+      - "${PORT:-8001}:8001"
+    environment:
+      - JWS_SECRET=${JWS_SECRET:-mysecretkey}
+      - JWS_ISS=${JWS_ISS:-ans-registry.example}
+      - JWS_KID=${JWS_KID:-registry-hs256-key-1}
+      - POLICY_VERSION=${POLICY_VERSION:-registry.policy.v3}
+      - PORT=${PORT:-8001}
+    restart: unless-stopped
+    networks:
+      - agent-network
+
+networks:
+  agent-network:
+    driver: bridge
+
+volumes:
+  # agent_reg_data:       # Agent Registry SQLite 데이터 (주석 처리 - 서비스 없음)
+  redis-agents-data:    # 에이전트용 Redis 데이터
+  redis-iam-data:       # IAM 솔루션용 Redis 데이터
+  solution_data:        # Solution 앱 데이터
+  solution_redis_data:  # Solution Redis 데이터
+  jwt_redis_data:       # JWT Redis 데이터

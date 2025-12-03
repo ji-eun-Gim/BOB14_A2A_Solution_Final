@@ -1,0 +1,328 @@
+.agents-layout {
+  display: grid;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (min-width: 1100px) {
+  .agents-layout {
+    grid-template-columns: 320px minmax(0, 1fr);
+  }
+}
+
+.agent-sidebar {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* 사이드바 헤더 + 검색바 래퍼 */
+.agent-sidebar .widget-header-with-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+
+  padding: 1.5rem 1.5rem 1rem;
+  margin-bottom: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* 제목 영역은 내용만큼만 차지 */
+.agent-sidebar .widget-title.icon-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+/* 오른쪽 검색 영역은 남은 가로 공간 전부 사용 */
+.agent-sidebar .widget-actions {
+  flex: 1;
+}
+
+.agent-sidebar .widget-actions .agent-search {
+  width: 100%;
+}
+
+.agent-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.agent-search-icon {
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.agent-search-bar .agent-search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.agent-search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 0.95rem;
+  outline: none;
+}
+
+/* 예전 input 전용 스타일은 제거
+.agent-sidebar .widget-actions input {
+  width: 100%;
+}
+*/
+
+.agent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: clamp(280px, 70vh, 640px);
+  overflow-y: auto;
+}
+
+.agent-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.agent-item:last-child {
+  border-bottom: none;
+}
+
+.agent-item:hover,
+.agent-item.active {
+  background: rgba(101, 209, 255, 0.12);
+}
+
+.agent-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.agent-name {
+  font-weight: 600;
+}
+
+.agent-description {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.agent-details {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.agent-details-placeholder {
+  display: grid;
+  place-content: center;
+  gap: 0.75rem;
+  min-height: 360px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.agent-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.overview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.overview-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-end;
+  min-width: 160px;
+}
+
+.overview-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.35rem;
+}
+
+.overview-actions .status-message {
+  text-align: right;
+}
+
+.plugins-panel {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.plugin-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.plugin-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(101, 209, 255, 0.06);
+}
+
+.plugin-item strong {
+  display: block;
+  font-size: 0.95rem;
+}
+
+/* 필요하면 policy-form / policy-editor 중 하나만 쓰면 되는데,
+   지금은 기존 클래스 유지해 둘게 */
+.policy-editor,
+.policy-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.5rem;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.policy-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+}
+
+.policy-columns {
+  display: grid;
+  gap: 1.25rem;
+}
+
+@media (min-width: 800px) {
+  .policy-columns {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.policy-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(5, 14, 28, 0.4);
+}
+
+.policy-description {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.ruleset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ruleset-item {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding: 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+}
+
+.ruleset-item input[type="checkbox"] {
+  margin-top: 0.2rem;
+  width: auto;
+}
+
+.ruleset-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ruleset-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.ruleset-description {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.policy-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+@media (max-width: 768px) {
+  .overview-meta {
+    align-items: flex-start;
+  }
+
+  .policy-actions {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .overview-actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .overview-actions .status-message {
+    text-align: left;
+    width: 100%;
+  }
+}
