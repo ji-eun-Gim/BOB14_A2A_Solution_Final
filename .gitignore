@@ -85,8 +85,6 @@ agent_reg_data/
 # -------------------------
 # Logs
 # -------------------------
-logs/
-!frontend/logs/
 *.log
 nohup.out
 agentDB/redis-data/
