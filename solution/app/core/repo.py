@@ -218,7 +218,7 @@ def _infer_method(entry: dict) -> str:
 
 
 def _normalize_registry_log_entry(entry: dict) -> dict:
-    """레지스트리 로그 필드를 UI가 기대하는 스키마로 정규화."""
+    """레지스트리/에이전트 로그 필드를 UI가 기대하는 스키마로 정규화."""
     if not isinstance(entry, dict):
         return {}
     try:
@@ -226,11 +226,31 @@ def _normalize_registry_log_entry(entry: dict) -> dict:
     except Exception:
         now_iso = datetime.utcnow().isoformat() + 'Z'
 
+    # source 판별: 명시적으로 지정되었거나 에이전트 관련 필드가 있으면 agent
+    source = entry.get('source', '')
+    if not source:
+        # policy_enforcement.py에서 오는 로그 판별
+        if entry.get('agent_id') or entry.get('policy_type') or entry.get('verdict'):
+            source = 'agent'
+        else:
+            source = 'registry'
+
     raw_status = entry.get('status')
     try:
         status = int(raw_status)
     except Exception:
-        status = raw_status if raw_status is not None else None
+        # verdict 기반 상태 추론 (에이전트 로그용)
+        verdict = str(entry.get('verdict') or '').upper()
+        if verdict in ('PASS', 'SAFE', 'ALLOWED'):
+            status = 200
+        elif verdict in ('VIOLATION', 'BLOCKED', 'DENIED'):
+            status = 403
+        elif entry.get('ok') is True:
+            status = 200
+        elif entry.get('ok') is False:
+            status = 500
+        else:
+            status = raw_status if raw_status is not None else None
 
     method_raw = (
         entry.get('method')
@@ -240,6 +260,10 @@ def _normalize_registry_log_entry(entry: dict) -> dict:
         or ''
     )
     method_norm = _CRUD_MAP.get(str(method_raw).strip().lower(), method_raw)
+    
+    # 메시지 구성: reason이 있으면 reason 사용 (policy_enforcement.py 호환)
+    message = entry.get('message') or entry.get('reason') or entry.get('detail') or ''
+    
     normalized = {
         'timestamp': (
             entry.get('timestamp')
@@ -252,12 +276,29 @@ def _normalize_registry_log_entry(entry: dict) -> dict:
         'method': str(method_norm),
         'status': status,
         'fail_stage': str(entry.get('fail_stage') or entry.get('stage') or ''),
-        'message': str(entry.get('message') or entry.get('detail') or ''),
-        'source': 'registry',
+        'message': str(message),
+        'source': source,
     }
+    
+    # 공통 필드
     for key in ('tenant_id', 'group_id', 'client_ip', 'clientIp', 'ip'):
         if key in entry and entry.get(key) is not None:
             normalized[key] = entry.get(key)
+    
+    # 에이전트 로그 전용 필드 (policy_enforcement.py 스키마)
+    if source == 'agent':
+        normalized['agent_id'] = str(entry.get('agent_id') or '')
+        normalized['policy_type'] = str(entry.get('policy_type') or '')
+        normalized['verdict'] = str(entry.get('verdict') or '')
+        normalized['tool_name'] = str(entry.get('tool_name') or '')
+        normalized['target_agent'] = str(entry.get('target_agent') or entry.get('destination_agent') or '')
+        # tool_args는 dict일 수 있음
+        if entry.get('tool_args'):
+            normalized['tool_args'] = entry.get('tool_args')
+        # prompt (prompt_validation용)
+        if entry.get('prompt'):
+            normalized['prompt'] = str(entry.get('prompt'))
+    
     if 'extra' in entry and entry.get('extra') is not None:
         normalized['extra'] = entry.get('extra')
     return normalized

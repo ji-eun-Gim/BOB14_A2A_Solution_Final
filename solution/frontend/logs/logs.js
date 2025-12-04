@@ -334,19 +334,45 @@ function populateDropdowns() {
   list.innerHTML = "";
   if (sorted.length === 0) {
     list.innerHTML = '<div style="padding:10px; color:#999;">데이터 없음</div>';
-    return;
+  } else {
+    sorted.forEach((agent) => {
+      const label = document.createElement("label");
+      label.className = "dropdown-item";
+      label.innerHTML = `<input type="checkbox" value="${agent}"> ${agent}`;
+      list.appendChild(label);
+    });
   }
-
-  sorted.forEach((agent) => {
-    const label = document.createElement("label");
-    label.className = "dropdown-item";
-    label.innerHTML = `<input type="checkbox" value="${agent}"> ${agent}`;
-    list.appendChild(label);
-  });
 
   updateToolDropdown([]);
   updateDropdownLabel(wrapper);
   agentFilters.agentIds = [];
+  
+  // 정책 유형 드롭다운 채우기 (policy_enforcement.py 스키마 기반)
+  const policyWrapper = document.getElementById("dropdown-policy");
+  if (policyWrapper) {
+    const policyList = policyWrapper.querySelector(".dropdown-list");
+    const policyTypes = new Set();
+    allLogs.forEach((l) => {
+      if (l.source === "agent" && l.policy_type) {
+        policyTypes.add(getPolicyLabel(l.policy_type));
+      }
+    });
+    
+    policyList.innerHTML = "";
+    const sortedPolicies = Array.from(policyTypes).sort();
+    if (sortedPolicies.length === 0) {
+      policyList.innerHTML = '<div style="padding:10px; color:#999;">데이터 없음</div>';
+    } else {
+      sortedPolicies.forEach((policy) => {
+        const label = document.createElement("label");
+        label.className = "dropdown-item";
+        label.innerHTML = `<input type="checkbox" value="${policy}"> ${policy}`;
+        policyList.appendChild(label);
+      });
+    }
+    updateDropdownLabel(policyWrapper);
+    agentFilters.policies = [];
+  }
 }
 
 function populateRegistryDropdowns() {
@@ -559,14 +585,19 @@ function renderAgentView() {
   if (agentFilters.toolNames.length > 0) {
     logs = logs.filter((l) => agentFilters.toolNames.includes(l.tool_name));
   }
+  // policy_type 기반 필터링 (policy_enforcement.py 스키마 호환)
   if (agentFilters.policies.length > 0) {
-    logs = logs.filter((l) => agentFilters.policies.includes(l.policy));
+    logs = logs.filter((l) => {
+      const policyLabel = getPolicyLabel(l.policy_type);
+      return agentFilters.policies.includes(policyLabel);
+    });
   }
   if (agentFilters.query) {
     logs = logs.filter(
       (l) =>
-        l.message.toLowerCase().includes(agentFilters.query) ||
-        l.user.toLowerCase().includes(agentFilters.query)
+        (l.message || "").toLowerCase().includes(agentFilters.query) ||
+        (l.agent_id || "").toLowerCase().includes(agentFilters.query) ||
+        (l.actor || "").toLowerCase().includes(agentFilters.query)
     );
   }
 
@@ -581,17 +612,51 @@ function renderAgentView() {
   logs.forEach((log) => {
     const clone = tmpl.content.cloneNode(true);
     clone.querySelector(".col-time").textContent = formatTime(log.timestamp);
+    
+    // 에이전트/툴 컬럼: policy_enforcement.py 스키마에 맞게 표시
     const agentCol = clone.querySelector(".col-agent");
-    if (log.policy === "에이전트 접근") {
-      agentCol.textContent = log.target_name;
+    if (log.tool_name) {
+      agentCol.textContent = `${log.agent_id || '-'} / ${log.tool_name}`;
+    } else if (log.target_agent) {
+      agentCol.textContent = `${log.agent_id || '-'} → ${log.target_agent}`;
     } else {
-      agentCol.textContent = `${log.agent_id} / ${log.tool_name}`;
+      agentCol.textContent = log.agent_id || '-';
     }
-    clone.querySelector(".col-policy").textContent = log.policy;
-    clone.querySelector(".col-msg").textContent = log.message;
+    
+    // 정책 유형 (policy_type을 한글로 변환)
+    clone.querySelector(".col-policy").textContent = getPolicyLabel(log.policy_type);
+    
+    // 메시지 (verdict 포함)
+    const msgCol = clone.querySelector(".col-msg");
+    const verdictBadge = getVerdictBadge(log.verdict);
+    msgCol.innerHTML = `${verdictBadge} ${log.message || '-'}`;
+    
     clone.querySelector("button").onclick = () => openModal(log);
     tbody.appendChild(clone);
   });
+}
+
+// policy_type을 한글 라벨로 변환
+function getPolicyLabel(policyType) {
+  const labels = {
+    'prompt_validation': '프롬프트 검증',
+    'tool_validation': '툴 접근',
+    'replay_protection': '리플레이 방지',
+    'agent_access': '에이전트 접근',
+  };
+  return labels[policyType] || policyType || '-';
+}
+
+// verdict를 배지로 변환
+function getVerdictBadge(verdict) {
+  if (!verdict) return '';
+  const upper = verdict.toUpperCase();
+  if (upper === 'PASS' || upper === 'SAFE' || upper === 'ALLOWED') {
+    return '<span style="background:#22c55e;color:#fff;padding:2px 6px;border-radius:4px;font-size:11px;margin-right:6px;">PASS</span>';
+  } else if (upper === 'VIOLATION' || upper === 'BLOCKED' || upper === 'DENIED') {
+    return '<span style="background:#ef4444;color:#fff;padding:2px 6px;border-radius:4px;font-size:11px;margin-right:6px;">BLOCKED</span>';
+  }
+  return `<span style="background:#64748b;color:#fff;padding:2px 6px;border-radius:4px;font-size:11px;margin-right:6px;">${verdict}</span>`;
 }
 
 // [추가] 상태 코드별 색상 유틸리티

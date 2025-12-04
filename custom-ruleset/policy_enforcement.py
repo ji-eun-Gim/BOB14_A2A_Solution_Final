@@ -299,11 +299,12 @@ class PolicyEnforcementPlugin(BasePlugin):
         if verdict != "SAFE":
             self._send_log(
                 {
+                    "source": "agent",
                     "agent_id": self.agent_id,
                     "policy_type": "prompt_validation",
                     "prompt": user_prompt,
                     "verdict": "VIOLATION",
-                    "reason": "사용자 프롬프트가 IAM 정책을 위반했습니다.",
+                    "message": f"[{self.agent_id}] 프롬프트 정책 위반: 사용자 프롬프트가 IAM 정책을 위반했습니다.",
                 }
             )
             violation_message = (
@@ -361,25 +362,18 @@ class PolicyEnforcementPlugin(BasePlugin):
             log_safe_violation = self.sanitize_error_message(violation, audience="log")
             self._send_log(
                 {
+                    "source": "agent",
                     "agent_id": self.agent_id,
                     "policy_type": "tool_validation",
                     "tool_name": tool_name,
                     "tool_args": tool_args,
                     "verdict": "BLOCKED",
-                    "reason": log_safe_violation,
+                    "message": f"[{self.agent_id}] 툴 차단: {log_safe_violation}",
+                    "target_agent": tool_args.get("agent_name", ""),
                 }
             )
             print(f"[PolicyPlugin][{self.agent_id}] 툴 차단: {log_safe_violation}")
             return {"error": user_safe_message}
-            self._send_log({
-                "agent_id": self.agent_id,
-                "type": "tool_blocked",
-                "tool": tool_name,
-                "reason": violation,
-                "tenant": current_tenant
-            })
-            print(f"[PolicyPlugin] ⛔ 차단됨({current_tenant}): {violation}")
-            return {"error": f"Policy Violation: {violation}"}
 
         print(f"[PolicyPlugin] ✅ 승인됨({current_tenant}): {tool_name}")
         return None
@@ -415,11 +409,12 @@ class PolicyEnforcementPlugin(BasePlugin):
         reason = "Repeated message payload detected within replay TTL"
         self._send_log(
             {
+                "source": "agent",
                 "agent_id": self.agent_id,
                 "policy_type": "replay_protection",
                 "verdict": "BLOCKED",
-                "reason": reason,
-                "tool_name": None,
+                "message": f"[{self.agent_id}] 리플레이 차단: {reason}",
+                "tool_name": "",
             }
         )
         violation_message = (
@@ -601,14 +596,24 @@ class PolicyEnforcementPlugin(BasePlugin):
 
     def _send_log(self, payload: Dict[str, Any]) -> None:
         payload = self._sanitize_payload(dict(payload))
+        log_url = f"{self.log_server_url}/api/logs"
+        print(f"[PolicyPlugin] 📤 로그 전송 시도: {log_url}")
+        print(f"[PolicyPlugin] 📦 페이로드: {payload}")
         try:
-            requests.post(
-                f"{self.log_server_url}/api/logs",
+            response = requests.post(
+                log_url,
                 json=payload,
                 timeout=2,
             )
-        except Exception:  # pragma: no cover - logging best-effort
-            pass
+            print(f"[PolicyPlugin] ✅ 로그 전송 결과: HTTP {response.status_code}")
+            if response.status_code >= 400:
+                print(f"[PolicyPlugin] ⚠️ 로그 서버 응답: {response.text[:200]}")
+        except requests.exceptions.ConnectionError as e:
+            print(f"[PolicyPlugin] ❌ 로그 서버 연결 실패 ({log_url}): {e}")
+        except requests.exceptions.Timeout:
+            print(f"[PolicyPlugin] ⏱️ 로그 서버 타임아웃 ({log_url})")
+        except Exception as e:
+            print(f"[PolicyPlugin] ❌ 로그 전송 예외: {type(e).__name__}: {e}")
 
     # ------------------------------------------------------------------
     # Authentication helpers

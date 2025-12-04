@@ -127,7 +127,7 @@ services:
       - REDIS_HOST=redis-agents
       - REDIS_PORT=6379
       - POLICY_SERVER_URL=http://policy-server:8005
-      - LOG_SERVER_URL=http://policy-server:8005
+      - LOG_SERVER_URL=http://solution:3000
       - PYTHONUNBUFFERED=1
     depends_on:
       redis-agents:
@@ -153,7 +153,7 @@ services:
       - REDIS_HOST=redis-agents
       - REDIS_PORT=6379
       - POLICY_SERVER_URL=http://policy-server:8005
-      - LOG_SERVER_URL=http://policy-server:8005
+      - LOG_SERVER_URL=http://solution:3000
       - PYTHONUNBUFFERED=1
     depends_on:
       redis-agents:
@@ -179,7 +179,7 @@ services:
       - REDIS_HOST=redis-agents
       - REDIS_PORT=6379
       - POLICY_SERVER_URL=http://policy-server:8005
-      - LOG_SERVER_URL=http://policy-server:8005
+      - LOG_SERVER_URL=http://solution:3000
       - PYTHONUNBUFFERED=1
     depends_on:
       redis-agents:
@@ -205,7 +205,7 @@ services:
       - REDIS_HOST=redis-agents
       - REDIS_PORT=6379
       - POLICY_SERVER_URL=http://policy-server:8005
-      - LOG_SERVER_URL=http://policy-server:8005
+      - LOG_SERVER_URL=http://solution:3000
       - PYTHONUNBUFFERED=1
     depends_on:
       redis-agents:
@@ -228,7 +228,7 @@ services:
       - GOOGLE_API_KEY
       - AGENT_REGISTRY_URL=http://solution:3000
       - POLICY_SERVER_URL=http://policy-server:8005
-      - LOG_SERVER_URL=http://policy-server:8005
+      - LOG_SERVER_URL=http://solution:3000
       - PYTHONUNBUFFERED=1
     depends_on:
       policy-server:
