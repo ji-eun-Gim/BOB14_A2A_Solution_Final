@@ -97,10 +97,243 @@
         border-radius: 50%;
       }
 
+      .graph-legend-dot.registry { background: var(--accent); }
       .graph-legend-dot.active { background: var(--success); }
       .graph-legend-dot.warning { background: var(--warning); }
       .graph-legend-dot.inactive { background: var(--danger); }
       .graph-legend-dot.external { background: #8b5cf6; }
+
+      /* Graph Controls */
+      .graph-controls {
+        display: flex;
+        gap: 0.25rem;
+      }
+
+      .btn-small {
+        padding: 0.15rem 0.3rem !important;
+        font-size: 0.65rem !important;
+      }
+
+      .btn-small .material-symbols-outlined {
+        font-size: 0.9rem !important;
+      }
+
+      #agent-flow-graph {
+        cursor: grab;
+      }
+
+      #agent-flow-graph:active {
+        cursor: grabbing;
+      }
+
+      /* Node Detail Panel */
+      .node-detail-panel {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 280px;
+        height: 100%;
+        background: rgba(13, 21, 38, 0.95);
+        border-left: 1px solid rgba(101, 209, 255, 0.2);
+        z-index: 10;
+        display: flex;
+        flex-direction: column;
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+        backdrop-filter: blur(10px);
+      }
+
+      .node-detail-panel.visible {
+        transform: translateX(0);
+      }
+
+      .node-detail-panel.hidden {
+        transform: translateX(100%);
+      }
+
+      .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.75rem;
+        border-bottom: 1px solid rgba(101, 209, 255, 0.15);
+        background: rgba(9, 14, 30, 0.5);
+      }
+
+      .panel-title {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-weight: 600;
+        font-size: 0.85rem;
+        color: #fff;
+      }
+
+      .node-status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+
+      .node-status-dot.active { background: var(--success); }
+      .node-status-dot.warning { background: var(--warning); }
+      .node-status-dot.inactive { background: var(--danger); }
+      .node-status-dot.external { background: #8b5cf6; }
+      .node-status-dot.registry { background: var(--accent); }
+
+      .panel-close {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 0.25rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        transition: all 0.2s;
+      }
+
+      .panel-close:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+      }
+
+      .panel-close .material-symbols-outlined {
+        font-size: 1.1rem;
+      }
+
+      .panel-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0.75rem;
+      }
+
+      .panel-section {
+        margin-bottom: 1rem;
+      }
+
+      .panel-section h4 {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin-bottom: 0.5rem;
+        letter-spacing: 0.5px;
+      }
+
+      .info-grid {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0.3rem 0.75rem;
+        font-size: 0.75rem;
+      }
+
+      .info-grid .label {
+        color: var(--text-secondary);
+      }
+
+      .info-grid .value {
+        color: #fff;
+        word-break: break-all;
+      }
+
+      .stats-mini-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.4rem;
+      }
+
+      .stats-mini-grid .stat-item {
+        background: rgba(101, 209, 255, 0.05);
+        border: 1px solid rgba(101, 209, 255, 0.1);
+        border-radius: 6px;
+        padding: 0.5rem;
+        text-align: center;
+      }
+
+      .stats-mini-grid .stat-value {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--accent);
+      }
+
+      .stats-mini-grid .stat-value.warning {
+        color: var(--warning);
+      }
+
+      .stats-mini-grid .stat-value.danger {
+        color: var(--danger);
+      }
+
+      .stats-mini-grid .stat-label {
+        font-size: 0.65rem;
+        color: var(--text-secondary);
+        margin-top: 0.15rem;
+      }
+
+      .event-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+
+      .event-item {
+        background: rgba(9, 14, 30, 0.5);
+        border: 1px solid rgba(101, 209, 255, 0.1);
+        border-radius: 6px;
+        padding: 0.5rem;
+        font-size: 0.7rem;
+      }
+
+      .event-item .event-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.25rem;
+      }
+
+      .event-item .event-type {
+        font-weight: 600;
+        color: var(--accent);
+      }
+
+      .event-item .event-type.violation {
+        color: var(--danger);
+      }
+
+      .event-item .event-time {
+        color: var(--text-secondary);
+        font-size: 0.6rem;
+      }
+
+      .event-item .event-message {
+        color: rgba(255, 255, 255, 0.8);
+        line-height: 1.3;
+      }
+
+      .event-list::-webkit-scrollbar {
+        width: 4px;
+      }
+
+      .event-list::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 2px;
+      }
+
+      .event-list::-webkit-scrollbar-thumb {
+        background: rgba(101, 209, 255, 0.3);
+        border-radius: 2px;
+      }
+
+      .no-events {
+        color: var(--text-secondary);
+        font-size: 0.75rem;
+        text-align: center;
+        padding: 1rem;
+      }
 
       /* Stats Grid */
       .stats-content {
@@ -561,6 +794,17 @@
                 <h2>에이전트 그래프</h2>
                 <div class="header-actions">
                   <span class="pill pill-live" id="flow-status">● 동기화 중…</span>
+                  <div class="graph-controls">
+                    <button class="btn-icon btn-small" id="graph-zoom-in" title="확대">
+                      <span class="material-symbols-outlined">zoom_in</span>
+                    </button>
+                    <button class="btn-icon btn-small" id="graph-zoom-out" title="축소">
+                      <span class="material-symbols-outlined">zoom_out</span>
+                    </button>
+                    <button class="btn-icon btn-small" id="graph-reset" title="원래 위치">
+                      <span class="material-symbols-outlined">center_focus_strong</span>
+                    </button>
+                  </div>
                   <button class="btn-icon" id="refresh-flow">
                     <span class="material-symbols-outlined">refresh</span>
                     새로고침
@@ -573,6 +817,9 @@
                   <svg id="agent-flow-graph" role="presentation"></svg>
                   <div class="graph-legend">
                     <div class="graph-legend-item">
+                      <span class="graph-legend-dot registry"></span> 레지스트리
+                    </div>
+                    <div class="graph-legend-item">
                       <span class="graph-legend-dot active"></span> 활성
                     </div>
                     <div class="graph-legend-item">
@@ -583,6 +830,39 @@
                     </div>
                     <div class="graph-legend-item">
                       <span class="graph-legend-dot external"></span> 외부
+                    </div>
+                  </div>
+                  
+                  <!-- Node Detail Panel -->
+                  <div id="node-detail-panel" class="node-detail-panel hidden">
+                    <div class="panel-header">
+                      <div class="panel-title">
+                        <span class="node-status-dot" id="panel-status-dot"></span>
+                        <span id="panel-node-name">노드 선택</span>
+                      </div>
+                      <button class="panel-close" id="panel-close">
+                        <span class="material-symbols-outlined">close</span>
+                      </button>
+                    </div>
+                    <div class="panel-content">
+                      <div class="panel-section">
+                        <h4>기본 정보</h4>
+                        <div class="info-grid" id="panel-basic-info">
+                          <!-- 동적 생성 -->
+                        </div>
+                      </div>
+                      <div class="panel-section">
+                        <h4>통계</h4>
+                        <div class="stats-mini-grid" id="panel-stats">
+                          <!-- 동적 생성 -->
+                        </div>
+                      </div>
+                      <div class="panel-section">
+                        <h4>최근 이벤트</h4>
+                        <div class="event-list" id="panel-events">
+                          <!-- 동적 생성 -->
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>

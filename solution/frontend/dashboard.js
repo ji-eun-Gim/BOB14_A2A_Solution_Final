@@ -17,6 +17,9 @@ window.addEventListener('DOMContentLoaded', () => {
   
   // 로그만 실시간 갱신 (3초)
   setInterval(loadRecentLogsAsync, LOG_REFRESH_INTERVAL);
+  
+  // 그래프 실시간 동기화 시작 (10초)
+  startGraphSync();
 });
 
 function setupControls() {
@@ -385,19 +388,29 @@ function updateEventsChart(logs) {
             label: '이벤트',
             data: eventSeries,
             borderColor: 'rgba(101, 209, 255, 0.9)',
-            backgroundColor: 'rgba(101, 209, 255, 0.1)',
+            backgroundColor: 'transparent',
             tension: 0.35,
-            fill: true,
+            fill: false,  // 선만 표시
             borderWidth: 2,
+            pointBackgroundColor: 'rgba(101, 209, 255, 0.8)',
+            pointBorderColor: 'rgba(101, 209, 255, 1)',
+            pointRadius: (ctx) => ctx.parsed?.y === 0 ? 0 : 2,
+            pointHoverRadius: (ctx) => ctx.parsed?.y === 0 ? 0 : 4,
+            order: 1,  // 앞에 그려짐
           },
           {
             label: '위반',
             data: violationSeries,
-            borderColor: 'rgba(255, 102, 102, 0.9)',
-            backgroundColor: 'rgba(255, 102, 102, 0.1)',
+            borderColor: 'rgba(255, 102, 102, 1)',
+            backgroundColor: 'rgba(255, 102, 102, 0.15)',
             tension: 0.35,
-            fill: true,
-            borderWidth: 2,
+            fill: true,  // 영역 채우기
+            borderWidth: 2.5,
+            pointBackgroundColor: 'rgba(255, 102, 102, 1)',
+            pointBorderColor: 'rgba(255, 102, 102, 1)',
+            pointRadius: (ctx) => ctx.parsed?.y === 0 ? 0 : 3,
+            pointHoverRadius: (ctx) => ctx.parsed?.y === 0 ? 0 : 5,
+            order: 2,  // 뒤에 그려짐 (위반이 항상 위에)
           },
         ],
       },
@@ -464,21 +477,37 @@ async function loadAgentFlow(manual = false) {
   }
 
   try {
-    const response = await fetch(`${API_BASE}/api/graph/agent-flow?limit=200`);
-    if (!response.ok) throw new Error('에이전트 흐름을 불러오지 못했습니다');
-    const flow = await response.json();
+    // 에이전트와 로그 데이터를 동시에 가져옴
+    const [agentsRes, logsRes] = await Promise.all([
+      fetch(`${API_BASE}/api/agents`),
+      fetch(`${API_BASE}/api/logs?limit=500`)
+    ]);
 
+    if (!agentsRes.ok) {
+      throw new Error(`에이전트 API 오류: ${agentsRes.status} ${agentsRes.statusText}`);
+    }
+
+    const agents = await agentsRes.json();
+
+    let logs = [];
+    if (logsRes.ok) {
+      const logsData = await logsRes.json();
+      logs = Array.isArray(logsData) ? logsData : (logsData.logs || []);
+    }
+
+    // 그래프 데이터 구성
+    const flow = buildGraphFromData(agents, logs);
     renderAgentFlowGraph(flow);
 
     if (statusPill) {
-      const updatedAt = flow.meta?.generated_at
-        ? new Date(flow.meta.generated_at).toLocaleTimeString()
-        : new Date().toLocaleTimeString();
+      const updatedAt = new Date().toLocaleTimeString();
       statusPill.textContent = `● ${updatedAt} 갱신`;
       statusPill.className = 'pill pill-live';
+      statusPill.style.color = '';
+      statusPill.style.borderColor = '';
     }
   } catch (error) {
-    console.error('에이전트 흐름을 불러오지 못했습니다', error);
+    console.error('에이전트 흐름을 불러오지 못했습니다:', error);
     if (statusPill) {
       statusPill.textContent = '● 동기화 실패';
       statusPill.className = 'pill';
@@ -488,7 +517,148 @@ async function loadAgentFlow(manual = false) {
   }
 }
 
-function getNodeColor(status) {
+// 에이전트와 로그 데이터로부터 그래프 구성
+function buildGraphFromData(agents, logs) {
+  const nodes = [];
+  const edges = [];
+  const nodeMap = new Map();
+  const edgeMap = new Map();
+
+  // 레지스트리 노드 추가 (중심 노드)
+  const registryNode = {
+    id: 'registry',
+    name: 'Registry',
+    status: 'active',
+    type: 'registry',
+    metrics: { events: 0, violations: 0 }
+  };
+  nodes.push(registryNode);
+  nodeMap.set('registry', registryNode);
+
+  // 에이전트 노드 추가
+  (Array.isArray(agents) ? agents : []).forEach(agent => {
+    const agentId = agent.agent_id || agent.id;
+    if (!agentId || nodeMap.has(agentId)) return;
+
+    const node = {
+      id: agentId,
+      name: agent.name || agent.display_name || agentId,
+      status: agent.status || 'unknown',
+      type: 'agent',
+      plugins: agent.plugins || [],
+      metrics: { events: 0, violations: 0 }
+    };
+    nodes.push(node);
+    nodeMap.set(agentId, node);
+  });
+
+  // 로그에서 연결 관계와 메트릭 추출
+  (Array.isArray(logs) ? logs : []).forEach(log => {
+    const agentId = log.agent_id || log.agentId;
+    const source = log.source;
+    // verdict/status가 문자열이 아닐 수 있으므로 안전하게 처리
+    const rawVerdict = log.verdict || log.status || '';
+    const verdict = (typeof rawVerdict === 'string' ? rawVerdict : String(rawVerdict || '')).toLowerCase();
+    const isViolation = ['violation', 'blocked', 'denied'].includes(verdict);
+
+    // 에이전트 메트릭 업데이트
+    if (agentId && nodeMap.has(agentId)) {
+      const node = nodeMap.get(agentId);
+      node.metrics.events++;
+      if (isViolation) node.metrics.violations++;
+    }
+
+    // 레지스트리 메트릭 업데이트
+    if (source === 'registry') {
+      registryNode.metrics.events++;
+      if (isViolation) registryNode.metrics.violations++;
+    }
+
+    // 에이전트-레지스트리 연결 (로그가 있으면 통신이 있다고 간주)
+    if (agentId && nodeMap.has(agentId)) {
+      const edgeKey = `${agentId}->registry`;
+      if (!edgeMap.has(edgeKey)) {
+        edgeMap.set(edgeKey, {
+          source: agentId,
+          target: 'registry',
+          count: 0,
+          violations: 0,
+          type: 'normal'
+        });
+      }
+      const edge = edgeMap.get(edgeKey);
+      edge.count++;
+      if (isViolation) {
+        edge.violations++;
+        edge.type = 'violation';
+      }
+    }
+
+    // 에이전트 간 통신 (caller-callee 관계가 있는 경우)
+    const calleeId = log.callee_id || log.target_agent;
+    if (agentId && calleeId && agentId !== calleeId) {
+      // callee 노드가 없으면 추가
+      if (!nodeMap.has(calleeId)) {
+        const calleeNode = {
+          id: calleeId,
+          name: calleeId,
+          status: 'external',
+          type: 'external',
+          metrics: { events: 0, violations: 0 }
+        };
+        nodes.push(calleeNode);
+        nodeMap.set(calleeId, calleeNode);
+      }
+
+      const edgeKey = `${agentId}->${calleeId}`;
+      if (!edgeMap.has(edgeKey)) {
+        edgeMap.set(edgeKey, {
+          source: agentId,
+          target: calleeId,
+          count: 0,
+          violations: 0,
+          type: 'normal'
+        });
+      }
+      const edge = edgeMap.get(edgeKey);
+      edge.count++;
+      if (isViolation) {
+        edge.violations++;
+        edge.type = 'violation';
+      }
+    }
+  });
+
+  // 연결이 없는 에이전트도 레지스트리와 연결
+  nodes.forEach(node => {
+    if (node.type === 'agent') {
+      const edgeKey = `${node.id}->registry`;
+      if (!edgeMap.has(edgeKey)) {
+        edgeMap.set(edgeKey, {
+          source: node.id,
+          target: 'registry',
+          count: 0,
+          type: 'inactive'
+        });
+      }
+    }
+  });
+
+  // 에지 필터링: source와 target 노드가 모두 존재하는 에지만 포함
+  const validEdges = Array.from(edgeMap.values()).filter(edge => {
+    return nodeMap.has(edge.source) && nodeMap.has(edge.target);
+  });
+
+  return {
+    nodes,
+    edges: validEdges
+  };
+}
+
+function getNodeColor(status, type) {
+  // Registry is special
+  if (type === 'registry') return '#65d1ff';
+  
   const normalised = (status || 'unknown').toLowerCase();
   switch (normalised) {
     case 'inactive': return '#ff6666';
@@ -500,132 +670,346 @@ function getNodeColor(status) {
   }
 }
 
-function renderAgentFlowGraph(flow) {
-  const svgElement = document.getElementById('agent-flow-graph');
-  const tooltip = document.getElementById('graph-tooltip');
-  if (!svgElement || !tooltip) return;
+// Global graph state for zoom/pan
+let graphZoom = null;
+let graphSvg = null;
+let graphContainer = null;
+let currentSimulation = null;
+let currentTransform = null;  // 현재 zoom/pan 상태 저장
+let nodePositions = new Map();  // 노드 위치 저장
 
-  const svg = d3.select(svgElement);
-  svg.selectAll('*').remove();
+function renderAgentFlowGraph(flow) {
+  try {
+    const svgElement = document.getElementById('agent-flow-graph');
+    const tooltip = document.getElementById('graph-tooltip');
+    if (!svgElement || !tooltip) {
+      console.error('[Graph] SVG 또는 tooltip 요소를 찾을 수 없음');
+      return;
+    }
+
+    const svg = d3.select(svgElement);
+    
+    // 현재 transform 저장 (있으면)
+    if (graphSvg && graphZoom) {
+      const currentZoomTransform = d3.zoomTransform(graphSvg.node());
+      if (currentZoomTransform && (currentZoomTransform.k !== 1 || currentZoomTransform.x !== 0 || currentZoomTransform.y !== 0)) {
+        currentTransform = currentZoomTransform;
+      }
+    }
+    
+    svg.selectAll('*').remove();
 
   const container = svgElement.parentElement;
   const width = container?.clientWidth || 720;
   const height = container?.clientHeight || 480;
 
-  svg.attr('viewBox', `0 0 ${width} ${height}`);
+  svg.attr('viewBox', `0 0 ${width} ${height}`)
+     .attr('width', '100%')
+     .attr('height', '100%');
 
-  const nodes = flow.nodes?.map((node) => ({ ...node })) || [];
+  graphSvg = svg;
+
+  // 노드 생성 시 저장된 위치 복원 (위치가 있으면 고정)
+  const nodes = flow.nodes?.map((node) => {
+    const savedPos = nodePositions.get(node.id);
+    if (savedPos && savedPos.x !== undefined && savedPos.y !== undefined) {
+      // 저장된 위치가 있으면 해당 위치로 고정
+      return { 
+        ...node, 
+        x: savedPos.x, 
+        y: savedPos.y, 
+        fx: savedPos.x,  // 고정 위치 설정
+        fy: savedPos.y 
+      };
+    }
+    return { ...node };
+  }) || [];
   const links = flow.edges?.map((edge) => ({ ...edge })) || [];
 
-  const simulation = d3
+  // Create main container for all graph elements FIRST
+  graphContainer = svg.append('g').attr('class', 'graph-main');
+
+  // Create zoom behavior
+  graphZoom = d3.zoom()
+    .scaleExtent([0.3, 4])
+    .on('zoom', (event) => {
+      graphContainer.attr('transform', event.transform);
+      currentTransform = event.transform;  // transform 저장
+    });
+
+  svg.call(graphZoom);
+  
+  // 저장된 transform 복원 (graphContainer 생성 후)
+  if (currentTransform) {
+    svg.call(graphZoom.transform, currentTransform);
+  }
+
+  // Arrow marker for directed edges
+  svg.append('defs').append('marker')
+    .attr('id', 'arrowhead')
+    .attr('viewBox', '-0 -5 10 10')
+    .attr('refX', 25)
+    .attr('refY', 0)
+    .attr('orient', 'auto')
+    .attr('markerWidth', 6)
+    .attr('markerHeight', 6)
+    .append('path')
+    .attr('d', 'M 0,-5 L 10,0 L 0,5')
+    .attr('fill', 'rgba(101, 209, 255, 0.5)');
+
+  // Stop previous simulation
+  if (currentSimulation) {
+    currentSimulation.stop();
+  }
+
+  // 저장된 위치가 있는지 확인
+  const hasExistingPositions = nodes.some(n => n.fx !== undefined && n.fy !== undefined);
+
+  currentSimulation = d3
     .forceSimulation(nodes)
     .force(
       'link',
       d3
         .forceLink(links)
         .id((d) => d.id)
-        .distance((d) => 140 - Math.min(d.count || 0, 60))
-        .strength(0.4)
+        .distance((d) => 120 + Math.min(d.count || 0, 30))
+        .strength(hasExistingPositions ? 0.1 : 0.5)  // 기존 위치 있으면 약하게
     )
-    .force('charge', d3.forceManyBody().strength(-260))
-    .force('center', d3.forceCenter(width / 2, height / 2))
-    .force('collision', d3.forceCollide().radius(60));
+    .force('charge', d3.forceManyBody().strength(hasExistingPositions ? -50 : -350))  // 기존 위치 있으면 약하게
+    .force('collision', d3.forceCollide().radius(70));
 
-  const link = svg
-    .append('g')
-    .attr('stroke', 'rgba(101, 209, 255, 0.25)')
-    .attr('stroke-width', 1.5)
+  // 기존 위치가 없을 때만 center force 적용
+  if (!hasExistingPositions) {
+    currentSimulation
+      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force('x', d3.forceX(width / 2).strength(0.05))
+      .force('y', d3.forceY(height / 2).strength(0.05));
+  }
+
+  // Link container
+  const linkGroup = graphContainer.append('g').attr('class', 'links');
+  
+  const link = linkGroup
     .selectAll('line')
     .data(links)
     .enter()
     .append('line')
     .attr('class', 'flow-link')
-    .attr('stroke-width', (d) => Math.max(1.5, Math.log(d.count + 1) * 2));
+    .attr('stroke', (d) => {
+      // Color based on communication type
+      if (d.type === 'violation') return 'rgba(255, 102, 102, 0.6)';
+      if (d.type === 'warning') return 'rgba(255, 170, 51, 0.5)';
+      return 'rgba(101, 209, 255, 0.35)';
+    })
+    .attr('stroke-width', (d) => Math.max(1.5, Math.log((d.count || 1) + 1) * 1.5))
+    .attr('marker-end', 'url(#arrowhead)')
+    .style('cursor', 'pointer')
+    .on('mouseover', (event, d) => showLinkTooltip(event, d))
+    .on('mouseout', hideTooltip);
 
-  const nodeGroup = svg
+  // Animate links
+  link.attr('stroke-dasharray', function() {
+    const length = this.getTotalLength?.() || 100;
+    return `${length} ${length}`;
+  })
+  .attr('stroke-dashoffset', function() {
+    return this.getTotalLength?.() || 100;
+  })
+  .transition()
+  .duration(1000)
+  .attr('stroke-dashoffset', 0);
+
+  // Node container
+  const nodeGroup = graphContainer
     .append('g')
+    .attr('class', 'nodes')
     .selectAll('g')
     .data(nodes)
     .enter()
     .append('g')
     .attr('class', 'flow-node')
+    .style('cursor', 'grab')
     .call(
-      d3
-        .drag()
+      d3.drag()
         .on('start', (event, d) => {
-          if (!event.active) simulation.alphaTarget(0.3).restart();
+          if (!event.active) currentSimulation.alphaTarget(0.3).restart();
           d.fx = d.x;
           d.fy = d.y;
+          d3.select(event.sourceEvent.target.parentNode).style('cursor', 'grabbing');
         })
         .on('drag', (event, d) => {
           d.fx = event.x;
           d.fy = event.y;
         })
         .on('end', (event, d) => {
-          if (!event.active) simulation.alphaTarget(0);
-          d.fx = null;
-          d.fy = null;
+          if (!event.active) currentSimulation.alphaTarget(0);
+          // Keep node fixed after drag
+          d3.select(event.sourceEvent.target.parentNode).style('cursor', 'grab');
         })
     );
 
-  // Outer glow circle
+  // Outer glow circle (pulse animation for active)
   nodeGroup
     .append('circle')
-    .attr('r', (d) => 26 + Math.min(12, Math.log((d.metrics?.events || 0) + 1) * 6))
-    .attr('fill', (d) => getNodeColor(d.status))
-    .attr('opacity', 0.2)
-    .attr('class', (d) => `node-circle status-${(d.status || 'unknown').toLowerCase()}`);
+    .attr('r', (d) => {
+      const baseSize = d.type === 'registry' ? 40 : 28;
+      return baseSize + Math.min(10, Math.log((d.metrics?.events || 0) + 1) * 5);
+    })
+    .attr('fill', (d) => getNodeColor(d.status, d.type))
+    .attr('opacity', (d) => d.type === 'registry' ? 0.25 : 0.15)
+    .attr('class', (d) => `node-glow status-${(d.status || 'unknown').toLowerCase()}`);
 
   // Core circle
   nodeGroup
     .append('circle')
-    .attr('r', (d) => 12 + Math.min(6, Math.log((d.metrics?.events || 0) + 1) * 3))
-    .attr('fill', (d) => getNodeColor(d.status))
-    .attr('stroke', '#fff')
-    .attr('stroke-width', 1.5)
-    .style('cursor', 'pointer')
-    .on('mouseover', (event, d) => showTooltip(event, d))
-    .on('mousemove', (event, d) => showTooltip(event, d))
-    .on('mouseout', hideTooltip);
+    .attr('r', (d) => {
+      const baseSize = d.type === 'registry' ? 22 : 14;
+      return baseSize + Math.min(6, Math.log((d.metrics?.events || 0) + 1) * 3);
+    })
+    .attr('fill', (d) => getNodeColor(d.status, d.type))
+    .attr('stroke', (d) => d.type === 'registry' ? '#fff' : 'rgba(255, 255, 255, 0.8)')
+    .attr('stroke-width', (d) => d.type === 'registry' ? 3 : 2)
+    .attr('class', 'node-core')
+    .on('mouseover', (event, d) => showNodeTooltip(event, d))
+    .on('mousemove', (event, d) => showNodeTooltip(event, d))
+    .on('mouseout', hideTooltip)
+    .on('click', (event, d) => {
+      event.stopPropagation();
+      showNodeDetailPanel(d, links);
+    })
+    .on('dblclick', (event, d) => {
+      // Double click to release fixed position
+      d.fx = null;
+      d.fy = null;
+      currentSimulation.alpha(0.3).restart();
+    });
+
+  // Status indicator
+  nodeGroup
+    .append('circle')
+    .attr('r', 4)
+    .attr('cx', (d) => 10 + Math.min(4, Math.log((d.metrics?.events || 0) + 1) * 2))
+    .attr('cy', (d) => -10 - Math.min(4, Math.log((d.metrics?.events || 0) + 1) * 2))
+    .attr('fill', (d) => {
+      if (d.metrics?.violations > 0) return '#ff6666';
+      if (d.status === 'warning') return '#ffaa33';
+      return '#4ef6b2';
+    })
+    .attr('stroke', '#0d1526')
+    .attr('stroke-width', 2);
 
   // Labels
   nodeGroup
     .append('text')
-    .attr('dy', 4)
+    .attr('dy', (d) => 30 + Math.min(6, Math.log((d.metrics?.events || 0) + 1) * 3))
     .attr('text-anchor', 'middle')
     .attr('class', 'node-label')
-    .text((d) => (d.name || d.id).split(' ')[0]);
+    .attr('fill', 'rgba(255, 255, 255, 0.9)')
+    .attr('font-size', '10px')
+    .attr('font-weight', '500')
+    .text((d) => {
+      const name = d.name || d.id;
+      return name.length > 12 ? name.substring(0, 12) + '…' : name;
+    });
 
-  simulation.on('tick', () => {
+  // Event count badge
+  nodeGroup
+    .filter((d) => (d.metrics?.events || 0) > 0)
+    .append('text')
+    .attr('dy', -2)
+    .attr('text-anchor', 'middle')
+    .attr('fill', '#fff')
+    .attr('font-size', '9px')
+    .attr('font-weight', 'bold')
+    .text((d) => d.metrics?.events || 0);
+
+  currentSimulation.on('tick', () => {
     link
-      .attr('x1', (d) => clampPosition(d.source.x, width))
-      .attr('y1', (d) => clampPosition(d.source.y, height))
-      .attr('x2', (d) => clampPosition(d.target.x, width))
-      .attr('y2', (d) => clampPosition(d.target.y, height));
+      .attr('x1', (d) => d.source.x)
+      .attr('y1', (d) => d.source.y)
+      .attr('x2', (d) => d.target.x)
+      .attr('y2', (d) => d.target.y);
 
-    nodeGroup.attr('transform', (d) => `translate(${clampPosition(d.x, width)}, ${clampPosition(d.y, height)})`);
+    nodeGroup.attr('transform', (d) => `translate(${d.x}, ${d.y})`);
+    
+    // 노드 위치 저장
+    nodes.forEach(node => {
+      nodePositions.set(node.id, { 
+        x: node.x, 
+        y: node.y, 
+        fx: node.fx, 
+        fy: node.fy 
+      });
+    });
   });
 
-  function showTooltip(event, node) {
+  // 저장된 위치가 있으면 시뮬레이션 거의 정지, 없으면 애니메이션
+  if (hasExistingPositions) {
+    // 기존 위치가 있으면 시뮬레이션 멈추고 수동으로 위치 적용
+    currentSimulation.stop();
+    
+    // 수동으로 노드 위치 적용
+    link
+      .attr('x1', (d) => d.source.x)
+      .attr('y1', (d) => d.source.y)
+      .attr('x2', (d) => d.target.x)
+      .attr('y2', (d) => d.target.y);
+    nodeGroup.attr('transform', (d) => `translate(${d.x}, ${d.y})`);
+  } else {
+    // 처음 렌더링이면 부드러운 애니메이션
+    currentSimulation.alpha(1).restart();
+  }
+
+  function showNodeTooltip(event, node) {
     if (!tooltip) return;
     tooltip.classList.remove('hidden');
-    tooltip.style.left = `${event.offsetX}px`;
-    tooltip.style.top = `${event.offsetY}px`;
+    
+    const rect = svgElement.getBoundingClientRect();
+    tooltip.style.left = `${event.clientX - rect.left + 15}px`;
+    tooltip.style.top = `${event.clientY - rect.top - 10}px`;
 
     const metrics = node.metrics || { events: 0, violations: 0 };
     const plugins = Array.isArray(node.plugins)
-      ? node.plugins
-          .map((plugin) => (typeof plugin === 'string' ? plugin : plugin.name))
-          .filter(Boolean)
+      ? node.plugins.map((p) => (typeof p === 'string' ? p : p.name)).filter(Boolean)
       : [];
+
+    const connections = links.filter(l => 
+      l.source.id === node.id || l.target.id === node.id ||
+      l.source === node.id || l.target === node.id
+    ).length;
 
     tooltip.innerHTML = `
       <div class="tooltip-title">${node.name || node.id}</div>
       <div class="tooltip-meta">${translateStatus(node.status)}</div>
       <ul>
-        <li><strong>${metrics.events || 0}</strong>건의 최근 이벤트</li>
+        <li><strong>${metrics.events || 0}</strong>건의 이벤트</li>
         <li><strong>${metrics.violations || 0}</strong>건의 위반</li>
+        <li><strong>${connections}</strong>개의 연결</li>
         <li><strong>${plugins.length}</strong>개의 플러그인</li>
+      </ul>
+      <div style="font-size: 9px; color: rgba(147, 164, 196, 0.6); margin-top: 4px;">
+        드래그: 이동 | 더블클릭: 고정 해제
+      </div>
+    `;
+  }
+
+  function showLinkTooltip(event, link) {
+    if (!tooltip) return;
+    tooltip.classList.remove('hidden');
+    
+    const rect = svgElement.getBoundingClientRect();
+    tooltip.style.left = `${event.clientX - rect.left + 15}px`;
+    tooltip.style.top = `${event.clientY - rect.top - 10}px`;
+
+    const sourceName = link.source.name || link.source.id || link.source;
+    const targetName = link.target.name || link.target.id || link.target;
+
+    tooltip.innerHTML = `
+      <div class="tooltip-title">통신 연결</div>
+      <ul>
+        <li><strong>${sourceName}</strong> → <strong>${targetName}</strong></li>
+        <li><strong>${link.count || 0}</strong>건의 통신</li>
+        ${link.type ? `<li>유형: ${link.type}</li>` : ''}
       </ul>
     `;
   }
@@ -634,8 +1018,237 @@ function renderAgentFlowGraph(flow) {
     if (!tooltip) return;
     tooltip.classList.add('hidden');
   }
+
+  // Setup control buttons
+  setupGraphControls(svg, width, height);
+  } catch (renderError) {
+    console.error('그래프 렌더링 에러:', renderError);
+  }
 }
 
-function clampPosition(value, max) {
-  return Math.max(40, Math.min(max - 40, value || 0));
+function setupGraphControls(svg, width, height) {
+  const zoomInBtn = document.getElementById('graph-zoom-in');
+  const zoomOutBtn = document.getElementById('graph-zoom-out');
+  const resetBtn = document.getElementById('graph-reset');
+
+  if (zoomInBtn) {
+    zoomInBtn.onclick = () => {
+      svg.transition().duration(300).call(graphZoom.scaleBy, 1.3);
+    };
+  }
+
+  if (zoomOutBtn) {
+    zoomOutBtn.onclick = () => {
+      svg.transition().duration(300).call(graphZoom.scaleBy, 0.7);
+    };
+  }
+
+  if (resetBtn) {
+    resetBtn.onclick = () => {
+      // 저장된 상태 초기화
+      currentTransform = null;
+      nodePositions.clear();
+      
+      // 화면 리셋
+      svg.transition().duration(500).call(
+        graphZoom.transform,
+        d3.zoomIdentity.translate(0, 0).scale(1)
+      );
+      
+      // 노드 고정 해제 및 시뮬레이션 재시작
+      if (currentSimulation) {
+        currentSimulation.nodes().forEach(node => {
+          node.fx = null;
+          node.fy = null;
+        });
+        currentSimulation.alpha(0.5).restart();
+      }
+    };
+  }
 }
+
+// Real-time graph sync interval
+let graphSyncInterval = null;
+
+function startGraphSync() {
+  // Sync every 10 seconds
+  if (graphSyncInterval) clearInterval(graphSyncInterval);
+  graphSyncInterval = setInterval(() => {
+    loadAgentFlow(false);
+  }, 10000);
+}
+
+function stopGraphSync() {
+  if (graphSyncInterval) {
+    clearInterval(graphSyncInterval);
+    graphSyncInterval = null;
+  }
+}
+
+// ========== Node Detail Panel ==========
+let selectedNodeId = null;
+
+function showNodeDetailPanel(node, links) {
+  const panel = document.getElementById('node-detail-panel');
+  if (!panel) return;
+
+  selectedNodeId = node.id;
+  
+  // 패널 표시
+  panel.classList.remove('hidden');
+  panel.classList.add('visible');
+
+  // 헤더 업데이트
+  const statusDot = document.getElementById('panel-status-dot');
+  const nodeName = document.getElementById('panel-node-name');
+  
+  if (statusDot) {
+    statusDot.className = `node-status-dot ${node.type === 'registry' ? 'registry' : (node.status || 'unknown').toLowerCase()}`;
+  }
+  if (nodeName) {
+    nodeName.textContent = node.name || node.id;
+  }
+
+  // 기본 정보 업데이트
+  const basicInfo = document.getElementById('panel-basic-info');
+  if (basicInfo) {
+    const connections = links.filter(l => 
+      l.source.id === node.id || l.target.id === node.id ||
+      l.source === node.id || l.target === node.id
+    ).length;
+
+    basicInfo.innerHTML = `
+      <span class="label">ID</span>
+      <span class="value">${node.id}</span>
+      <span class="label">유형</span>
+      <span class="value">${getNodeTypeLabel(node.type)}</span>
+      <span class="label">상태</span>
+      <span class="value">${translateStatus(node.status)}</span>
+      <span class="label">연결</span>
+      <span class="value">${connections}개</span>
+      ${node.plugins?.length ? `
+        <span class="label">플러그인</span>
+        <span class="value">${node.plugins.length}개</span>
+      ` : ''}
+    `;
+  }
+
+  // 통계 업데이트
+  const stats = document.getElementById('panel-stats');
+  if (stats) {
+    const metrics = node.metrics || { events: 0, violations: 0 };
+    stats.innerHTML = `
+      <div class="stat-item">
+        <div class="stat-value">${metrics.events || 0}</div>
+        <div class="stat-label">이벤트</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value ${metrics.violations > 0 ? 'danger' : ''}">${metrics.violations || 0}</div>
+        <div class="stat-label">위반</div>
+      </div>
+    `;
+  }
+
+  // 관련 이벤트 로드
+  loadNodeEvents(node.id, node.type);
+
+  // 패널 닫기 버튼 이벤트
+  const closeBtn = document.getElementById('panel-close');
+  if (closeBtn) {
+    closeBtn.onclick = hideNodeDetailPanel;
+  }
+}
+
+function hideNodeDetailPanel() {
+  const panel = document.getElementById('node-detail-panel');
+  if (panel) {
+    panel.classList.remove('visible');
+    panel.classList.add('hidden');
+  }
+  selectedNodeId = null;
+}
+
+function getNodeTypeLabel(type) {
+  const labels = {
+    'registry': '레지스트리',
+    'agent': '에이전트',
+    'external': '외부 에이전트'
+  };
+  return labels[type] || type || '알 수 없음';
+}
+
+async function loadNodeEvents(nodeId, nodeType) {
+  const eventList = document.getElementById('panel-events');
+  if (!eventList) return;
+
+  eventList.innerHTML = '<div class="no-events">로딩 중...</div>';
+
+  try {
+    const response = await fetch(`${API_BASE}/api/logs?limit=100`);
+    if (!response.ok) throw new Error('로그를 불러오지 못했습니다');
+    
+    const logsData = await response.json();
+    const logs = Array.isArray(logsData) ? logsData : (logsData.logs || []);
+
+    // 해당 노드와 관련된 로그 필터링
+    let relatedLogs;
+    if (nodeType === 'registry') {
+      relatedLogs = logs.filter(log => log.source === 'registry');
+    } else {
+      relatedLogs = logs.filter(log => {
+        const agentId = log.agent_id || log.agentId;
+        const calleeId = log.callee_id || log.target_agent;
+        return agentId === nodeId || calleeId === nodeId;
+      });
+    }
+
+    // 최근 10개만 표시
+    relatedLogs = relatedLogs.slice(0, 10);
+
+    if (relatedLogs.length === 0) {
+      eventList.innerHTML = '<div class="no-events">관련 이벤트가 없습니다</div>';
+      return;
+    }
+
+    eventList.innerHTML = relatedLogs.map(log => {
+      const rawVerdict = log.verdict || log.status || '';
+      const verdict = (typeof rawVerdict === 'string' ? rawVerdict : String(rawVerdict || '')).toLowerCase();
+      const isViolation = ['violation', 'blocked', 'denied'].includes(verdict);
+      const timestamp = log.timestamp ? new Date(log.timestamp).toLocaleString() : '';
+      const message = log.message || log.details || getPolicyLabel(log.policy_type) || '이벤트';
+
+      return `
+        <div class="event-item">
+          <div class="event-header">
+            <span class="event-type ${isViolation ? 'violation' : ''}">${isViolation ? '위반' : '이벤트'}</span>
+            <span class="event-time">${timestamp}</span>
+          </div>
+          <div class="event-message">${truncateMessage(message, 60)}</div>
+        </div>
+      `;
+    }).join('');
+
+  } catch (error) {
+    console.error('노드 이벤트 로드 실패:', error);
+    eventList.innerHTML = '<div class="no-events">이벤트를 불러오지 못했습니다</div>';
+  }
+}
+
+function truncateMessage(message, maxLength) {
+  if (!message) return '';
+  if (message.length <= maxLength) return message;
+  return message.substring(0, maxLength) + '...';
+}
+
+// SVG 클릭 시 패널 닫기
+document.addEventListener('DOMContentLoaded', () => {
+  const svgElement = document.getElementById('agent-flow-graph');
+  if (svgElement) {
+    svgElement.addEventListener('click', (event) => {
+      // 노드가 아닌 빈 영역 클릭 시 패널 닫기
+      if (event.target === svgElement || event.target.tagName === 'svg') {
+        hideNodeDetailPanel();
+      }
+    });
+  }
+});
