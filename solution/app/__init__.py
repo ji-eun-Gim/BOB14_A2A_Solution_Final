@@ -103,6 +103,11 @@ def create_app() -> Flask:
     def ruleset_redirect():
         return redirect(url_for('ruleset_page'))
 
+    # Static assets (images, etc.)
+    @app.get('/static/<path:filename>')
+    def serve_static(filename):
+        static_dir = os.path.join(BASEDIR, 'static')
+        return send_from_directory(static_dir, filename)
 
     from .api import api_bp
 
