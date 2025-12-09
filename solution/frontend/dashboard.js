@@ -984,8 +984,18 @@ function renderAgentFlowGraph(flow) {
   nodeGroup
     .append('circle')
     .attr('r', 4)
-    .attr('cx', (d) => 10 + Math.min(4, Math.log((d.metrics?.events || 0) + 1) * 2))
-    .attr('cy', (d) => -10 - Math.min(4, Math.log((d.metrics?.events || 0) + 1) * 2))
+    .attr('cx', (d) => {
+      const baseSize = d.type === 'registry' ? 22 : 14;
+      const coreR = baseSize + Math.min(6, Math.log((d.metrics?.events || 0) + 1) * 3);
+      const offset = coreR + 2; // 테두리 바로 밖
+      return offset * Math.cos(-Math.PI / 4);
+    })
+    .attr('cy', (d) => {
+      const baseSize = d.type === 'registry' ? 22 : 14;
+      const coreR = baseSize + Math.min(6, Math.log((d.metrics?.events || 0) + 1) * 3);
+      const offset = coreR + 4;
+      return offset * Math.sin(-Math.PI / 4);
+    })
     .attr('fill', (d) => {
       if (d.metrics?.violations > 0) return '#ff6666';
       if (d.status === 'warning') return '#ffaa33';
@@ -1012,8 +1022,9 @@ function renderAgentFlowGraph(flow) {
   nodeGroup
     .filter((d) => (d.metrics?.events || 0) > 0)
     .append('text')
-    .attr('dy', -2)
+    .attr('dy', 0)
     .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'middle')
     .attr('fill', '#fff')
     .attr('font-size', '9px')
     .attr('font-weight', 'bold')
