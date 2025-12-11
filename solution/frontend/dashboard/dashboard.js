@@ -959,9 +959,11 @@ function renderAgentFlowGraph(flow) {
     .attr('stroke-width', 2);
 
   // Labels
+  const getLabelOffset = (d) => getCoreRadius(d) + 12;
+
   nodeGroup
     .append('text')
-    .attr('dy', (d) => 30 + Math.min(6, Math.log((d.metrics?.events || 0) + 1) * 3))
+    .attr('dy', (d) => getLabelOffset(d))
     .attr('text-anchor', 'middle')
     .attr('class', 'node-label')
     .attr('fill', 'rgba(255, 255, 255, 0.9)')
