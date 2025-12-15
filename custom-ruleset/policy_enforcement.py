@@ -152,14 +152,16 @@ class PolicyEnforcementPlugin(BasePlugin):
     # ------------------------------------------------------------------
     # Policy retrieval helpers
     # ------------------------------------------------------------------
-    def _get_policy_for_tenant(self, tenant_str: str) -> Dict[str, Any]:
+    def _get_policy_for_tenant(self, tenant_str: str, user_email: str = "") -> Dict[str, Any]:
         """
         [HTTP API 모드] 테넌트 정책을 HTTP API로 요청하여 로드
         Docker 환경을 고려하여 여러 URL을 시도
+        user_email이 제공되면 그룹 멤버십을 확인하여 권한 없는 경우 빈 정책 반환
         """
-        # 1. 캐시에 있으면 리턴
-        if tenant_str in self._policy_cache:
-            return self._policy_cache[tenant_str]
+        # 1. 캐시 키에 user_email 포함 (사용자별 정책 캐싱)
+        cache_key = f"{tenant_str}:{user_email}" if user_email else tenant_str
+        if cache_key in self._policy_cache:
+            return self._policy_cache[cache_key]
 
         merged_policy = {
             "template": "merged_policy",
@@ -192,6 +194,10 @@ class PolicyEnforcementPlugin(BasePlugin):
                 "tenant": tenant_clean,
                 "author": "security manager"
             }
+            
+            # 사용자 이메일 전달하여 그룹 멤버십 확인
+            if user_email:
+                params["user"] = user_email
             
             data = None
             successful_url = None
@@ -253,7 +259,7 @@ class PolicyEnforcementPlugin(BasePlugin):
             merged_policy["allowed_list"] = list(merged_agent_map.values())
             merged_policy["_valid_targets"] = valid_targets 
             
-            self._policy_cache[tenant_str] = merged_policy
+            self._policy_cache[cache_key] = merged_policy
             
             print(f"[DEBUG] 최종 승인된 에이전트 목록: {valid_targets}")
             return merged_policy
@@ -424,6 +430,8 @@ class PolicyEnforcementPlugin(BasePlugin):
         
         claims = self._get_auth_claims(ctx, tool_args)
         current_tenant = self._extract_tenant_from_claims(claims)
+        # JWT 클레임에서 사용자 이메일 추출 (그룹 멤버십 확인용)
+        user_email = claims.get("sub") or claims.get("email") or claims.get("user") or ""
 
         if not current_tenant or current_tenant.startswith("<"):
             # LLM을 사용하여 유동적인 접근 거부 응답 생성
@@ -434,7 +442,7 @@ class PolicyEnforcementPlugin(BasePlugin):
             )
             return {"error": access_denied_message}
 
-        request_policy = self._get_policy_for_tenant(current_tenant)
+        request_policy = self._get_policy_for_tenant(current_tenant, user_email=user_email)
         
         if not request_policy:
             # LLM을 사용하여 유동적인 정책 없음 응답 생성
@@ -1154,13 +1162,21 @@ class PolicyEnforcementPlugin(BasePlugin):
         if val is None:
             return "<no_tenant>"
 
+        def _clean_tenant_value(v: Any) -> str:
+            """tenant 값에서 불필요한 따옴표와 공백을 제거합니다."""
+            s = str(v).strip()
+            # 양쪽 따옴표 제거 (JSON 직렬화 문제 대응)
+            if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+                s = s[1:-1].strip()
+            return s
+
         # 3. TenantValue = Union[str, List[str]] 처리
         if isinstance(val, list):
-            # 리스트인 경우: 로그 가독성을 위해 콤마로 연결하거나 첫 번째 값 사용
-            # 예: ['a', 'b'] -> "a,b"
-            return ",".join(str(v) for v in val)
+            # 리스트인 경우: 각 값을 정리하고 콤마로 연결
+            cleaned = [_clean_tenant_value(v) for v in val if v]
+            return ",".join(cleaned)
         
-        return str(val).strip()
+        return _clean_tenant_value(val)
 
     def _roles_satisfied(self, user_roles: list[str], required_roles: list[str]) -> bool:
         user_role_set = {role.lower() for role in user_roles}

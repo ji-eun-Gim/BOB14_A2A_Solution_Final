@@ -81,9 +81,13 @@ def require_jwt():
     status, data = result.get("status"), result.get("json") or {}
     if status == 200 and isinstance(data.get("email"), str):
         tenants = normalize_tenants(data.get("tenants"))
-        # 일부 토큰은 단일 tenant 필드를 사용하므로 보강
-        if not tenants and isinstance(data.get("tenant"), str):
-            tenants = normalize_tenants([data["tenant"]])
+        # JWT 서버는 "tenant" 필드를 사용하므로 보강 (str 또는 list 모두 처리)
+        if not tenants:
+            tenant_field = data.get("tenant")
+            if isinstance(tenant_field, str):
+                tenants = normalize_tenants([tenant_field])
+            elif isinstance(tenant_field, list):
+                tenants = normalize_tenants(tenant_field)
         g.jwt = {"sub": data["email"], "tenants": tenants}
         if _norm_email(data["email"]) == _ADMIN_EMAIL_NORM:
             g.jwt["role"] = "admin"

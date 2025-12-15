@@ -45,8 +45,13 @@ TENANT_CHOICES = _load_env_tenants()
 _VALID_TENANTS = {item["value"] for item in TENANT_CHOICES}
 
 
-def normalize_tenants(values: object) -> List[str]:
-    """입력 데이터를 문자열 리스트로 정규화."""
+def normalize_tenants(values: object, strict: bool = False) -> List[str]:
+    """입력 데이터를 문자열 리스트로 정규화.
+    
+    Args:
+        values: 정규화할 tenant 값 (str, list, 또는 기타)
+        strict: True면 _VALID_TENANTS에 있는 것만 허용, False면 모든 유효한 문자열 허용
+    """
     if isinstance(values, str):
         candidates: Iterable[object] = [values]
     elif isinstance(values, Iterable):
@@ -60,7 +65,12 @@ def normalize_tenants(values: object) -> List[str]:
         if not isinstance(value, str):
             continue
         slug = value.strip().lower()
-        if slug in _VALID_TENANTS and slug not in seen:
+        if not slug:
+            continue
+        # strict=False면 모든 tenant 허용 (동적으로 생성된 tenant 지원)
+        if strict and slug not in _VALID_TENANTS:
+            continue
+        if slug not in seen:
             normalized.append(slug)
             seen.add(slug)
     return normalized

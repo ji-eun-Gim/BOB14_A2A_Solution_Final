@@ -125,12 +125,14 @@ def read_users_me(token: str = Depends(oauth2_scheme)):
             detail="Token missing identity claims")
 
     user = get_user(email)
-    user_tenants = _normalize_tenants(user.tenant) if user else []
-    if not user or not user_tenants or set(user_tenants) != set(claim_tenants):
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found")
     
+    # tenant 일치 검사를 완화: 토큰의 tenant는 로그인 시점의 정보이며,
+    # 이후 사용자의 그룹/테넌트가 변경될 수 있으므로 엄격한 일치 검사를 제거.
+    # 사용자 존재 여부만 확인하고, 현재 DB의 tenant 정보를 반환.
     return user
 
 

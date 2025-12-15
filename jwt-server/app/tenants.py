@@ -73,6 +73,36 @@ def _ensure_user_has_tenant(email: str, tenant_id: str):
         redis_client.hset(key, mapping={"tenant": json.dumps(tenants)})
 
 
+def _remove_user_from_tenant(email: str, tenant_id: str):
+    """유저의 tenant 목록에서 tenant_id를 제거한다."""
+    key = f"user:{email}"
+    data = redis_client.hgetall(key)
+    if not data:
+        return
+
+    tenants = _normalize_user_tenants(data.get("tenant"))
+    if tenant_id in tenants:
+        tenants.remove(tenant_id)
+        redis_client.hset(key, mapping={"tenant": json.dumps(tenants)})
+
+
+def _is_user_in_any_group_of_tenant(email: str, tenant_id: str, exclude_group_id: str = "") -> bool:
+    """사용자가 해당 tenant의 다른 그룹에 속해있는지 확인한다."""
+    try:
+        data = _load_ruleset_payload(tenant_id)
+    except HTTPException:
+        return False
+    
+    groups = data.get("groups") or []
+    for group in groups:
+        if group.get("id") == exclude_group_id:
+            continue
+        members = group.get("members") or []
+        if email in members:
+            return True
+    return False
+
+
 def _as_bool(value, default=True) -> bool:
     if value is None:
         return default
@@ -392,14 +422,25 @@ def update_group_members(tenant_id: str, group_id: str, payload: dict):
             detail="Group not found",
         )
 
+    # 기존 멤버와 새 멤버 비교하여 제거된 멤버 찾기
+    old_members = set(target.get("members") or [])
+    new_members = set(members)
+    removed_members = old_members - new_members
+    added_members = new_members - old_members
+
     target["members"] = members
     data["groups"] = groups
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     _save_ruleset_payload(tenant_id, data)
 
-    # user DB에도 tenant 정보 추가
-    for email in members:
+    # 새로 추가된 멤버: tenant 정보 추가
+    for email in added_members:
         _ensure_user_has_tenant(email, tenant_id)
+
+    # 제거된 멤버: 해당 tenant의 다른 그룹에도 없으면 tenant 정보 제거
+    for email in removed_members:
+        if not _is_user_in_any_group_of_tenant(email, tenant_id, exclude_group_id=group_id):
+            _remove_user_from_tenant(email, tenant_id)
 
     return {"group_id": group_id, "members": members}
 
@@ -438,11 +479,16 @@ def delete_group(tenant_id: str, group_id: str):
 
     data = _load_ruleset_payload(tenant_id)
     groups = data.get("groups") or []
-    if not any(g.get("id") == group_id for g in groups):
+    target_group = next((g for g in groups if g.get("id") == group_id), None)
+    if not target_group:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Group not found",
         )
+    
+    # 삭제 전에 멤버 목록 저장
+    deleted_members = target_group.get("members") or []
+    
     data["groups"] = [g for g in groups if g.get("id") != group_id]
 
     ac = data.get("access_controls") or []
@@ -451,6 +497,12 @@ def delete_group(tenant_id: str, group_id: str):
     ]
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     _save_ruleset_payload(tenant_id, data)
+    
+    # 삭제된 그룹의 멤버: 해당 tenant의 다른 그룹에도 없으면 tenant 정보 제거
+    for email in deleted_members:
+        if not _is_user_in_any_group_of_tenant(email, tenant_id):
+            _remove_user_from_tenant(email, tenant_id)
+    
     return {"deleted": group_id}
 
 

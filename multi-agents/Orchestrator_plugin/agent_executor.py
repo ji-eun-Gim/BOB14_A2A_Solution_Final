@@ -1,3 +1,5 @@
+import base64
+import json
 import logging
 from uuid import uuid4
 
@@ -14,22 +16,42 @@ logger = logging.getLogger(__name__)
 _DEFAULT_USER_ERROR = "요청을 처리하는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
 
 
+def _decode_jwt_payload(token: str) -> dict:
+    """JWT 토큰에서 payload를 디코딩합니다 (서명 검증 없이)."""
+    if not token:
+        return {}
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return {}
+        # base64url 디코딩
+        padded = parts[1] + "=" * (4 - len(parts[1]) % 4)
+        decoded = base64.urlsafe_b64decode(padded)
+        return json.loads(decoded)
+    except Exception:
+        return {}
+
+
+def _extract_user_id_from_token(token: str) -> str:
+    """JWT 토큰에서 사용자 ID(이메일)를 추출합니다."""
+    payload = _decode_jwt_payload(token)
+    # sub 클레임에서 이메일 추출
+    user_id = payload.get("sub") or payload.get("email") or ""
+    return user_id if isinstance(user_id, str) else ""
+
+
 class ADKAgentExecutor(AgentExecutor):
     def __init__(
         self,
         agent,
         *,
         app_name: str = "orchestrator_app",
-        user_id: str = "user1",
-        session_id: str | None = None,
         plugins=None,
     ):
         self.agent = agent
         self.app_name = app_name
-        self.user_id = user_id
-        self.session_id = session_id or uuid4().hex
-        self._session_created = False
         self.plugins = plugins or []
+        # 각 요청마다 새 세션을 생성하므로 session_service는 공유해도 됨
         self.session_service = InMemorySessionService()
         self.runner = Runner(
             agent=self.agent,
@@ -40,16 +62,28 @@ class ADKAgentExecutor(AgentExecutor):
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         try:
-            # 세션 보장
-            if not self._session_created:
-                try:
-                    await self.session_service.create_session(
-                        app_name=self.app_name, user_id=self.user_id, session_id=self.session_id
-                    )
-                except AlreadyExistsError:
-                    logger.debug("Session already exists; reusing existing session %s", self.session_id)
-                finally:
-                    self._session_created = True
+            # 현재 요청의 토큰에서 사용자 ID 추출
+            token = GLOBAL_REQUEST_TOKEN.get(None)
+            user_id = _extract_user_id_from_token(token) if token else ""
+            
+            # 사용자 ID가 없으면 익명으로 처리
+            if not user_id:
+                user_id = f"anonymous_{uuid4().hex[:8]}"
+            
+            # ★ 핵심 수정: 매 요청마다 새로운 세션 ID 생성
+            # 이렇게 하면 각 요청이 완전히 독립적인 컨텍스트에서 실행됨
+            session_id = uuid4().hex
+            
+            print(f"[Session] 새 세션 생성: user={user_id}, session={session_id[:8]}...", flush=True)
+            
+            # 새 세션 생성
+            try:
+                await self.session_service.create_session(
+                    app_name=self.app_name, user_id=user_id, session_id=session_id
+                )
+            except AlreadyExistsError:
+                # 거의 발생하지 않지만 혹시 모르니
+                pass
 
             # 사용자 입력 추출
             user_input = ""
@@ -77,8 +111,8 @@ class ADKAgentExecutor(AgentExecutor):
                     logger.exception("플러그인 사전 준비 중 오류")
 
             async for event in self.runner.run_async(
-                user_id=self.user_id,
-                session_id=self.session_id,
+                user_id=user_id,
+                session_id=session_id,
                 new_message=user_message,
                 run_config=None,
             ):

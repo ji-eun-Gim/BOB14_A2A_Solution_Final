@@ -653,12 +653,14 @@ def get_tenant_allowed_template():
     Tenants 서비스의 rulesets 응답(access_controls)을 변환해 allowed_list를 반환.
 
     - tenant 쿼리 필수
+    - user 쿼리 선택 (그룹 멤버십 확인용, 미지정시 모든 정책 반환)
     - author 쿼리 선택(기본: security manager)
     - 기본적으로 action == 'deny' 인 룰도 포함(그룹 접근 허용 목록 관점으로 모두 수집)
     """
     tenant_id = (request.args.get("tenant") or "").strip()
     if not tenant_id:
         return jsonify({"error": "tenant is required"}), 400
+    user_email = (request.args.get("user") or "").strip()
     author = request.args.get("author") or "security manager"
     include_deny = True
 
@@ -666,6 +668,27 @@ def get_tenant_allowed_template():
         payload = _tenant_fetch_json(f"/tenants/{tenant_id}/rulesets")
     except Exception as e:
         return jsonify({"error": "failed to fetch tenant rulesets", "detail": str(e)}), 502
+
+    # 사용자 이메일이 제공된 경우, 해당 그룹의 멤버인지 확인
+    if user_email and isinstance(payload, dict):
+        groups = payload.get("groups") or []
+        is_member = False
+        for group in groups:
+            members = group.get("members") or []
+            if user_email in members:
+                is_member = True
+                break
+        
+        if not is_member:
+            # 그룹 멤버가 아니면 빈 allowed_list 반환
+            print(f"[tenant-template] 사용자 '{user_email}'는 tenant '{tenant_id}'의 그룹 멤버가 아님")
+            return Response(json.dumps({
+                "template": "custom",
+                "author": author,
+                "tenant": tenant_id,
+                "allowed_list": [],
+                "reason": f"User '{user_email}' is not a member of any group in tenant '{tenant_id}'"
+            }, ensure_ascii=False), mimetype="application/json")
 
     access_controls = []
     if isinstance(payload, dict):

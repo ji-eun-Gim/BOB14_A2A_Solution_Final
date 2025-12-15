@@ -81,7 +81,8 @@
   const originalFetch = window.fetch.bind(window)
   let authErrorNotified = false
 
-  const isAuthFailureStatus = (status) => [401, 403, 404, 498].includes(Number(status))
+  // 404는 일반적인 리소스 없음을 의미하므로 인증 실패로 처리하지 않음
+  const isAuthFailureStatus = (status) => [401, 403, 498].includes(Number(status))
 
   const shouldHandleAuthError = (input) => {
     try {
