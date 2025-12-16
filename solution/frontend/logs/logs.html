@@ -22,6 +22,10 @@
     />
     <link rel="stylesheet" href="../style.css" />
     <link rel="stylesheet" href="/logs/style.css" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap"
+    />
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://npmcdn.com/flatpickr/dist/l10n/ko.js"></script>
     <script src="../auth.js" defer></script>
@@ -420,7 +424,8 @@
                       </svg>
                       Export CSV
                     </button>
-                    <button class="btn-secondary small" id="refresh-logs">
+                    <button class="refresh-btn" id="refresh-logs">
+                      <span class="material-symbols-outlined refresh-icon" aria-hidden="true">refresh</span>
                       🔄 새로고침
                     </button>
                   </div>
@@ -793,7 +798,8 @@
                       </svg>
                       Export CSV
                     </button>
-                    <button class="btn-secondary small" id="refresh-registry">
+                    <button class="refresh-btn" id="refresh-registry">
+                      <span class="material-symbols-outlined refresh-icon" aria-hidden="true">refresh</span>
                       🔄 새로고침
                     </button>
                   </div>
