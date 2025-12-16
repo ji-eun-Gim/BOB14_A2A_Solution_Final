@@ -102,7 +102,8 @@ async function refreshAll(options = {}) {
   }
 }
 
-async function refreshAgentPolicy(agentId, tenantId) {
+async function refreshAgentPolicy(agentId, tenantId, options = {}) {
+  const { suppressErrors = true } = options;
   if (!agentId) {
     return;
   }
@@ -117,8 +118,13 @@ async function refreshAgentPolicy(agentId, tenantId) {
         body: JSON.stringify(payload),
       }
     );
+    return true;
   } catch (error) {
     console.warn("Agent refresh failed:", error.message);
+    if (!suppressErrors) {
+      throw error;
+    }
+    return false;
   }
 }
 
@@ -152,6 +158,13 @@ function initGroupActions() {
       const group = allGroups.find((g) => g.id === selectedGroupId);
       if (group) openGroupModal(group);
     });
+  }
+
+  const btnApplyGroupRules = document.getElementById("btn-apply-group-rules");
+  if (btnApplyGroupRules) {
+    btnApplyGroupRules.addEventListener("click", () =>
+      applyGroupRulesToAgents(btnApplyGroupRules)
+    );
   }
 
   const btnDeleteGroup = document.getElementById("btn-delete-group");
@@ -305,6 +318,70 @@ function initGroupActions() {
       });
     });
   }
+}
+
+async function applyGroupRulesToAgents(buttonEl) {
+  const btn = buttonEl || document.getElementById("btn-apply-group-rules");
+  const group = allGroups.find((g) => g.id === selectedGroupId);
+  if (!group) {
+    alert("그룹을 먼저 선택해 주세요.");
+    return;
+  }
+
+  const groupRules = allRulesets.filter(
+    (r) => r.group_id === group.id && r.target_agent
+  );
+  if (!groupRules.length) {
+    alert("이 그룹에 적용할 룰셋이 없습니다.");
+    return;
+  }
+
+  const targets = [];
+  const seen = new Set();
+  groupRules.forEach((rule) => {
+    const agentId = rule.target_agent || rule.agent_id;
+    if (!agentId) return;
+    const tenantId = rule.tenant_id || group.tenant_id || "";
+    const key = `${agentId}__${tenantId}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    targets.push({ agentId, tenantId });
+  });
+
+  if (!targets.length) {
+    alert("룰셋 대상 agent가 없습니다.");
+    return;
+  }
+
+  const originalLabel = btn?.textContent;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "적용 중...";
+  }
+
+  const failures = [];
+  for (const target of targets) {
+    try {
+      await refreshAgentPolicy(target.agentId, target.tenantId, {
+        suppressErrors: false,
+      });
+    } catch (err) {
+      const msg = err?.message || String(err);
+      failures.push(`${target.agentId}: ${msg}`);
+    }
+  }
+
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = originalLabel || "룰셋 적용";
+  }
+
+  if (failures.length) {
+    alert(`일부 agent 정책 새로고침에 실패했습니다:\\n${failures.join("\\n")}`);
+    return;
+  }
+
+  alert("그룹의 룰셋을 적용했습니다.");
 }
 
 // --- Modal Functions ---
